@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge-building's Draw</title>
+<style>
+  :root { --navy:#12263a; --orange:#c0362c; --bg:#f7f3ec; --text:#2b333b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Calibri, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { background:var(--navy); color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { margin:0; font-size:20px; font-family:Georgia, serif; }
+  main { max-width:560px; margin:32px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid #e3dccf; border-radius:10px; padding:24px; margin-bottom:20px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tabs button { flex:1; padding:10px; border:1px solid #e3dccf; background:#f7f3ec; cursor:pointer; border-radius:6px; font-size:15px; }
+  .tabs button.active { background:var(--navy); color:#fff; border-color:var(--navy); }
+  label { display:block; margin:12px 0 4px; font-size:14px; }
+  input { width:100%; padding:10px; border:1px solid #cfc7b8; border-radius:6px; font-size:16px; }
+  #submit, #logout { margin-top:16px; padding:12px; width:100%; background:var(--orange); color:#fff; border:0; border-radius:6px; font-size:16px; cursor:pointer; }
+  #submit:disabled { opacity:.6; cursor:wait; }
+  #logout { width:auto; margin:0; padding:8px 14px; background:transparent; border:1px solid #fff; display:none; }
+  #msg { margin-top:12px; font-size:14px; min-height:18px; }
+  #msg.err { color:#b00020; } #msg.ok { color:#1b7a3d; }
+  .balance { font-size:32px; font-weight:bold; color:var(--orange); font-family:Georgia, serif; }
+  .draw { border-top:1px solid #eee; padding:12px 0; }
+  .draw:first-child { border-top:0; }
+  .muted { color:#6b7480; font-size:14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bridge-building's Draw</h1>
+  <button id="logout">Log out</button>
+</header>
+
+<main>
+  <!-- Sign up / Log in -->
+  <section id="auth" class="card">
+    <div class="tabs">
+      <button id="tab-login" class="active" type="button">Log in</button>
+      <button id="tab-signup" type="button">Sign up</button>
+    </div>
+    <form id="auth-form">
+      <div id="name-row" style="display:none">
+        <label for="full_name">Full name</label>
+        <input id="full_name" type="text" autocomplete="name">
+      </div>
+      <label for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email">
+      <label for="password">Password (at least 6 characters)</label>
+      <input id="password" type="password" required minlength="6" autocomplete="current-password">
+      <button id="submit" type="submit">Log in</button>
+      <div id="msg"></div>
+    </form>
+  </section>
+
+  <!-- Logged-in area -->
+  <section id="app" style="display:none">
+    <div class="card">
+      <div class="muted">Signed in as <span id="who"></span></div>
+      <div class="muted" style="margin-top:16px">Wallet balance</div>
+      <div class="balance" id="balance">0.00</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0;font-family:Georgia,serif">Open draws</h2>
+      <div id="draws" class="muted">Loading...</div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+  const SUPABASE_URL = 'https://bhmlskishqkldhdknyxp.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_RQCf4jqqHqgNT3lZrdYYrA_T1SLMCK8';
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const $ = (id) => document.getElementById(id);
+  let mode = 'login';
+
+  function setMode(m) {
+    mode = m;
+    $('tab-login').classList.toggle('active', m === 'login');
+    $('tab-signup').classList.toggle('active', m === 'signup');
+    $('name-row').style.display = m === 'signup' ? 'block' : 'none';
+    $('submit').textContent = m === 'signup' ? 'Create account' : 'Log in';
+    $('password').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
+    msg('');
+  }
+  function msg(text, ok) {
+    const el = $('msg');
+    el.textContent = text;
+    el.className = ok ? 'ok' : 'err';
+  }
+
+  $('tab-login').onclick = () => setMode('login');
+  $('tab-signup').onclick = () => setMode('signup');
+
+  $('auth-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const email = $('email').value.trim();
+    const password = $('password').value;
+    $('submit').disabled = true;
+    msg('');
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await sb.auth.signUp({
+          email, password,
+          options: { data: { full_name: $('full_name').value.trim() } }
+        });
+        if (error) throw error;
+        if (!data.session) msg('Account created. Check your email to confirm, then log in.', true);
+      } else {
+        const { error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (e) {
+      msg(e.message || 'Something went wrong.');
+    }
+    $('submit').disabled = false;
+  });
+
+  $('logout').onclick = () => sb.auth.signOut();
+
+  const PRIZE = { rv: 'RV', camping_van: 'Camping van', camping_truck: 'Camping truck' };
+
+  async function show(session) {
+    $('auth').style.display = session ? 'none' : 'block';
+    $('app').style.display = session ? 'block' : 'none';
+    $('logout').style.display = session ? 'inline-block' : 'none';
+    if (!session) return;
+    $('who').textContent = session.user.email;
+
+    const w = await sb.from('wallets').select('balance_cents,currency').maybeSingle();
+    if (w.data) {
+      $('balance').textContent = (w.data.balance_cents / 100).toFixed(2) + ' ' + w.data.currency;
+    }
+
+    const d = await sb.from('draws').select('*').order('created_at', { ascending: false });
+    const box = $('draws');
+    box.textContent = '';
+    if (d.error || !d.data || d.data.length === 0) {
+      box.textContent = 'No open draws yet.';
+      return;
+    }
+    d.data.forEach((x) => {
+      const row = document.createElement('div');
+      row.className = 'draw';
+      const t = document.createElement('strong');
+      t.textContent = x.title;
+      const s = document.createElement('div');
+      s.className = 'muted';
+      s.textContent = (PRIZE[x.prize_type] || x.prize_type) + ' | ticket ' +
+        (x.ticket_price_cents / 100).toFixed(2) + ' | max ' + x.max_tickets + ' tickets';
+      row.appendChild(t);
+      row.appendChild(s);
+      box.appendChild(row);
+    });
+  }
+
+  // Fires on page load and on every login/logout
+  sb.auth.onAuthStateChange((_event, session) => {
+    setTimeout(() => show(session), 0);
+  });
+</script>
+</body>
+</html>
