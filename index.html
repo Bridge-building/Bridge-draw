@@ -66,7 +66,7 @@
       <div class="balance" id="balance">0.00</div>
     </div>
     <div class="card">
-      <h2 style="margin-top:0;font-family:Georgia,serif">Open draws</h2>
+      <h2 style="margin-top:0;font-family:Georgia,serif">Draws</h2>
       <div id="draws" class="muted">Loading...</div>
       <div id="buymsg" style="margin-top:12px;font-size:14px;"></div>
     </div>
@@ -163,11 +163,21 @@
         (x.ticket_price_cents / 100).toFixed(2) + ' | max ' + x.max_tickets + ' tickets';
       row.appendChild(t);
       row.appendChild(s);
-      const b = document.createElement('button');
-      b.className = 'buy';
-      b.textContent = 'Buy ticket (' + (x.ticket_price_cents / 100).toFixed(2) + ')';
-      b.onclick = () => buy(x.id, b);
-      row.appendChild(b);
+      if (x.status === 'open') {
+        const b = document.createElement('button');
+        b.className = 'buy';
+        b.textContent = 'Buy ticket (' + (x.ticket_price_cents / 100).toFixed(2) + ')';
+        b.onclick = () => buy(x.id, b);
+        row.appendChild(b);
+      } else {
+        const st = document.createElement('div');
+        st.style.marginTop = '8px';
+        st.className = x.status === 'drawn' ? 'ok' : 'muted';
+        st.textContent = x.status === 'drawn'
+          ? 'Draw finished. Winning ticket: #' + x.winner_ticket_number
+          : 'Ticket sales closed';
+        row.appendChild(st);
+      }
       box.appendChild(row);
     });
   }
@@ -192,7 +202,7 @@
 
   async function loadTickets() {
     const box = $('tickets');
-    const t = await sb.from('tickets').select('ticket_number, draws(title)').order('created_at', { ascending: false });
+    const t = await sb.from('tickets').select('id, ticket_number, draws(title, winner_ticket_id)').order('created_at', { ascending: false });
     box.textContent = '';
     if (t.error || !t.data || t.data.length === 0) {
       box.textContent = 'You have no tickets yet.';
@@ -201,7 +211,9 @@
     t.data.forEach((x) => {
       const r = document.createElement('div');
       r.className = 'draw';
-      r.textContent = (x.draws ? x.draws.title : 'Draw') + ' - ticket #' + x.ticket_number;
+      const won = x.draws && x.draws.winner_ticket_id === x.id;
+      r.textContent = (x.draws ? x.draws.title : 'Draw') + ' - ticket #' + x.ticket_number + (won ? '  - WINNER!' : '');
+      if (won) { r.style.fontWeight = 'bold'; r.style.color = '#1b7a3d'; }
       box.appendChild(r);
     });
   }
