@@ -29,6 +29,7 @@
   .err { color:#b00020; } .ok { color:#1b7a3d; }
   .buy { margin-top:8px; padding:8px 16px; background:var(--orange); color:#fff; border:0; border-radius:6px; font-size:15px; cursor:pointer; }
   .buy:disabled { opacity:.6; cursor:wait; }
+  select { width:100%; padding:10px; border:1px solid #cfc7b8; border-radius:6px; font-size:16px; background:#fff; }
 </style>
 </head>
 <body>
@@ -64,6 +65,23 @@
       <div class="muted">Signed in as <span id="who"></span></div>
       <div class="muted" style="margin-top:16px">Wallet balance</div>
       <div class="balance" id="balance">0.00</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0;font-family:Georgia,serif">Add funds</h2>
+      <div id="payinfo" class="muted" style="margin-bottom:8px"></div>
+      <label for="dep_amount">Amount (USD)</label>
+      <input id="dep_amount" type="number" min="1" step="0.01">
+      <label for="dep_method">Method</label>
+      <select id="dep_method">
+        <option value="bank_transfer">Bank transfer</option>
+        <option value="crypto">Crypto</option>
+      </select>
+      <label for="dep_ref">Your payment reference</label>
+      <input id="dep_ref" type="text" maxlength="100">
+      <button id="dep_btn" class="buy" type="button" style="margin-top:12px">Submit deposit request</button>
+      <div id="depmsg" style="margin-top:12px;font-size:14px;"></div>
+      <h3 style="margin:20px 0 4px;font-family:Georgia,serif">My deposits</h3>
+      <div id="deposits" class="muted">Loading...</div>
     </div>
     <div class="card">
       <h2 style="margin-top:0;font-family:Georgia,serif">Draws</h2>
@@ -130,6 +148,9 @@
 
   $('logout').onclick = () => sb.auth.signOut();
 
+  // Shown to players under "Add funds". Replace only after the organiser's licence and payment details are confirmed.
+  const PAYMENT_INSTRUCTIONS = 'Payment instructions are not available yet. Deposits are currently in test mode.';
+
   const PRIZE = { rv: 'RV', camping_van: 'Camping van', camping_truck: 'Camping truck' };
 
   async function show(session) {
@@ -139,6 +160,8 @@
     if (!session) return;
     $('who').textContent = session.user.email;
     loadTickets();
+    loadDeposits();
+    $('payinfo').textContent = PAYMENT_INSTRUCTIONS;
 
     const w = await sb.from('wallets').select('balance_cents,currency').maybeSingle();
     if (w.data) {
@@ -214,6 +237,55 @@
       const won = x.draws && x.draws.winner_ticket_id === x.id;
       r.textContent = (x.draws ? x.draws.title : 'Draw') + ' - ticket #' + x.ticket_number + (won ? '  - WINNER!' : '');
       if (won) { r.style.fontWeight = 'bold'; r.style.color = '#1b7a3d'; }
+      box.appendChild(r);
+    });
+  }
+
+  $('dep_btn').onclick = async () => {
+    const out = $('depmsg');
+    const amount = Math.round(parseFloat($('dep_amount').value) * 100);
+    if (!amount || amount < 100) {
+      out.className = 'err';
+      out.textContent = 'Enter an amount of at least 1.00';
+      return;
+    }
+    $('dep_btn').disabled = true;
+    out.className = 'muted';
+    out.textContent = 'Sending...';
+    const { error } = await sb.rpc('request_deposit', {
+      p_amount_cents: amount,
+      p_method: $('dep_method').value,
+      p_reference: $('dep_ref').value
+    });
+    if (error) {
+      out.className = 'err';
+      out.textContent = error.message;
+    } else {
+      out.className = 'ok';
+      out.textContent = 'Request received. It will be credited after it is approved.';
+      $('dep_amount').value = '';
+      $('dep_ref').value = '';
+      loadDeposits();
+    }
+    $('dep_btn').disabled = false;
+  };
+
+  async function loadDeposits() {
+    const box = $('deposits');
+    const t = await sb.from('transactions')
+      .select('amount_cents, method, status, created_at')
+      .eq('type', 'deposit')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    box.textContent = '';
+    if (t.error || !t.data || t.data.length === 0) {
+      box.textContent = 'No deposits yet.';
+      return;
+    }
+    t.data.forEach((x) => {
+      const r = document.createElement('div');
+      r.className = 'draw';
+      r.textContent = (x.amount_cents / 100).toFixed(2) + ' - ' + x.method.replace('_', ' ') + ' - ' + x.status;
       box.appendChild(r);
     });
   }
