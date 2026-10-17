@@ -29,6 +29,7 @@
   .err { color:#b00020; } .ok { color:#1b7a3d; }
   .buy { margin-top:8px; padding:8px 16px; background:var(--orange); color:#fff; border:0; border-radius:6px; font-size:15px; cursor:pointer; }
   .buy:disabled { opacity:.6; cursor:wait; }
+  .rej { background:#6b7480; margin-left:8px; }
   select { width:100%; padding:10px; border:1px solid #cfc7b8; border-radius:6px; font-size:16px; background:#fff; }
 </style>
 </head>
@@ -91,6 +92,33 @@
     <div class="card">
       <h2 style="margin-top:0;font-family:Georgia,serif">My tickets</h2>
       <div id="tickets" class="muted">Loading...</div>
+    </div>
+
+    <!-- Admin area: only visible to admin accounts -->
+    <div id="admin" class="card" style="display:none;border-color:#c0362c">
+      <h2 style="margin-top:0;font-family:Georgia,serif">Admin</h2>
+      <div id="adm_msg" style="margin-bottom:12px;font-size:14px;"></div>
+
+      <h3 style="margin:8px 0 4px;font-family:Georgia,serif">Create a draw</h3>
+      <label for="adm_title">Title</label>
+      <input id="adm_title" type="text" maxlength="100">
+      <label for="adm_type">Prize type</label>
+      <select id="adm_type">
+        <option value="rv">RV</option>
+        <option value="camping_van">Camping van</option>
+        <option value="camping_truck">Camping truck</option>
+      </select>
+      <label for="adm_price">Ticket price (USD)</label>
+      <input id="adm_price" type="number" min="1" step="0.01">
+      <label for="adm_max">Maximum tickets</label>
+      <input id="adm_max" type="number" min="1" step="1">
+      <button id="adm_create" class="buy" type="button" style="margin-top:12px">Create draw</button>
+
+      <h3 style="margin:24px 0 4px;font-family:Georgia,serif">Pending deposits</h3>
+      <div id="adm_deposits" class="muted">Loading...</div>
+
+      <h3 style="margin:24px 0 4px;font-family:Georgia,serif">Draws</h3>
+      <div id="adm_draws" class="muted">Loading...</div>
     </div>
   </section>
 </main>
@@ -161,6 +189,7 @@
     $('who').textContent = session.user.email;
     loadTickets();
     loadDeposits();
+    loadAdmin();
     $('payinfo').textContent = PAYMENT_INSTRUCTIONS;
 
     const w = await sb.from('wallets').select('balance_cents,currency').maybeSingle();
@@ -289,6 +318,117 @@
       box.appendChild(r);
     });
   }
+
+  // ---------- Admin ----------
+  function admMsg(text, ok) {
+    const el = $('adm_msg');
+    el.className = ok ? 'ok' : 'err';
+    el.textContent = text;
+  }
+  async function refreshAll() {
+    const cur = await sb.auth.getSession();
+    if (cur.data.session) show(cur.data.session);
+  }
+
+  async function loadAdmin() {
+    const p = await sb.from('profiles').select('is_admin').maybeSingle();
+    const isAdmin = !!(p.data && p.data.is_admin);
+    $('admin').style.display = isAdmin ? 'block' : 'none';
+    if (!isAdmin) return;
+
+    const dbox = $('adm_deposits');
+    const dep = await sb.rpc('admin_pending_deposits');
+    dbox.textContent = '';
+    if (dep.error) {
+      dbox.textContent = dep.error.message;
+    } else if (!dep.data || dep.data.length === 0) {
+      dbox.textContent = 'No pending deposits.';
+    } else {
+      dep.data.forEach((x) => {
+        const row = document.createElement('div');
+        row.className = 'draw';
+        const amt = (x.amount_cents / 100).toFixed(2);
+        const info = document.createElement('div');
+        info.textContent = amt + ' - ' + x.method.replace('_', ' ') + ' - ref: ' + x.reference + ' - ' + x.email;
+        const ok = document.createElement('button');
+        ok.className = 'buy';
+        ok.textContent = 'Approve';
+        ok.onclick = async () => {
+          if (!confirm('Approve ' + amt + ' for ' + x.email + '?\nOnly approve if the money has really arrived.')) return;
+          const r = await sb.rpc('admin_approve_deposit', { p_tx_id: x.id });
+          if (r.error) admMsg(r.error.message); else admMsg(r.data, true);
+          refreshAll();
+        };
+        const no = document.createElement('button');
+        no.className = 'buy rej';
+        no.textContent = 'Reject';
+        no.onclick = async () => {
+          if (!confirm('Reject this deposit of ' + amt + ' from ' + x.email + '?')) return;
+          const r = await sb.rpc('admin_reject_deposit', { p_tx_id: x.id });
+          if (r.error) admMsg(r.error.message); else admMsg(r.data, true);
+          refreshAll();
+        };
+        row.appendChild(info);
+        row.appendChild(ok);
+        row.appendChild(no);
+        dbox.appendChild(row);
+      });
+    }
+
+    const wbox = $('adm_draws');
+    const dr = await sb.rpc('admin_draws');
+    wbox.textContent = '';
+    if (dr.error) {
+      wbox.textContent = dr.error.message;
+    } else if (!dr.data || dr.data.length === 0) {
+      wbox.textContent = 'No draws yet.';
+    } else {
+      dr.data.forEach((x) => {
+        const row = document.createElement('div');
+        row.className = 'draw';
+        const info = document.createElement('div');
+        info.textContent = x.title + ' - ' + x.status + ' - ' + x.tickets + ' / ' + x.max_tickets + ' tickets sold';
+        row.appendChild(info);
+        if (x.status === 'open' && Number(x.tickets) > 0) {
+          const b = document.createElement('button');
+          b.className = 'buy';
+          b.textContent = 'Pick winner';
+          b.onclick = async () => {
+            if (!confirm('Pick the winner for "' + x.title + '"?\nThis closes the draw and cannot be undone.')) return;
+            const r = await sb.rpc('admin_pick_winner', { p_draw_id: x.id });
+            if (r.error) admMsg(r.error.message); else admMsg(r.data, true);
+            refreshAll();
+          };
+          row.appendChild(b);
+        }
+        wbox.appendChild(row);
+      });
+    }
+  }
+
+  $('adm_create').onclick = async () => {
+    const price = Math.round(parseFloat($('adm_price').value) * 100);
+    const max = parseInt($('adm_max').value, 10);
+    if (!price || price < 1 || !max || max < 1) {
+      admMsg('Enter a valid ticket price and maximum tickets.');
+      return;
+    }
+    const r = await sb.rpc('admin_create_draw', {
+      p_title: $('adm_title').value,
+      p_prize_type: $('adm_type').value,
+      p_price_cents: price,
+      p_max_tickets: max
+    });
+    if (r.error) {
+      admMsg(r.error.message);
+    } else {
+      admMsg('Draw created.', true);
+      $('adm_title').value = '';
+      $('adm_price').value = '';
+      $('adm_max').value = '';
+      refreshAll();
+    }
+  };
 
   // Fires on page load and on every login/logout
   sb.auth.onAuthStateChange((_event, session) => {
