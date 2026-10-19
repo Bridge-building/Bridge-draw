@@ -36,6 +36,8 @@
   .gal-main { width:100%; max-height:280px; object-fit:cover; border-radius:8px; margin-top:8px; display:block; }
   .gal-row { display:flex; gap:6px; margin-top:6px; overflow-x:auto; }
   .gal-thumb { width:64px; height:48px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #e3dccf; }
+  textarea { width:100%; padding:10px; border:1px solid #cfc7b8; border-radius:6px; font-size:16px; font-family:inherit; }
+  .desc { white-space:pre-wrap; margin-top:8px; font-size:15px; line-height:1.5; }
   select { width:100%; padding:10px; border:1px solid #cfc7b8; border-radius:6px; font-size:16px; background:#fff; }
 </style>
 </head>
@@ -124,6 +126,8 @@
       <input id="adm_price" type="number" min="1" step="0.01">
       <label for="adm_max">Maximum tickets</label>
       <input id="adm_max" type="number" min="1" step="1">
+      <label for="adm_desc">Description (make, model, features, condition, location)</label>
+      <textarea id="adm_desc" rows="5" maxlength="2000"></textarea>
       <button id="adm_create" class="buy" type="button" style="margin-top:12px">Create draw</button>
 
       <h3 style="margin:24px 0 4px;font-family:Georgia,serif">Pending deposits</h3>
@@ -245,6 +249,12 @@
       row.appendChild(t);
       row.appendChild(s);
       row.appendChild(buildGallery(x.draw_images));
+      if (x.description) {
+        const ds = document.createElement('div');
+        ds.className = 'desc';
+        ds.textContent = x.description;
+        row.appendChild(ds);
+      }
       if (x.status === 'open') {
         const b = document.createElement('button');
         b.className = 'buy';
@@ -410,6 +420,9 @@
     const imgs = await sb.from('draw_images').select('id, draw_id, path, created_at').order('created_at');
     const byDraw = {};
     ((imgs.data) || []).forEach((i) => { (byDraw[i.draw_id] = byDraw[i.draw_id] || []).push(i); });
+    const det = await sb.from('draws').select('id, title, description');
+    const byId = {};
+    ((det.data) || []).forEach((d) => { byId[d.id] = d; });
     wbox.textContent = '';
     if (dr.error) {
       wbox.textContent = dr.error.message;
@@ -461,6 +474,31 @@
         row.appendChild(fi);
         row.appendChild(upb);
 
+        const dcur = byId[x.id] || { title: x.title, description: '' };
+        const ti = document.createElement('input');
+        ti.type = 'text';
+        ti.maxLength = 100;
+        ti.value = dcur.title;
+        ti.style.marginTop = '12px';
+        const ta = document.createElement('textarea');
+        ta.rows = 5;
+        ta.maxLength = 2000;
+        ta.value = dcur.description || '';
+        ta.placeholder = 'Description: make, model, features, condition, location...';
+        ta.style.marginTop = '8px';
+        const sv = document.createElement('button');
+        sv.className = 'buy';
+        sv.type = 'button';
+        sv.textContent = 'Save title and description';
+        sv.onclick = async () => {
+          const r = await sb.rpc('admin_update_draw_details', { p_draw_id: x.id, p_title: ti.value, p_description: ta.value });
+          if (r.error) admMsg(r.error.message); else admMsg('Details saved.', true);
+          refreshAll();
+        };
+        row.appendChild(ti);
+        row.appendChild(ta);
+        row.appendChild(sv);
+
         if (x.status === 'open' && Number(x.tickets) > 0) {
           const b = document.createElement('button');
           b.className = 'buy';
@@ -489,7 +527,8 @@
       p_title: $('adm_title').value,
       p_prize_type: $('adm_type').value,
       p_price_cents: price,
-      p_max_tickets: max
+      p_max_tickets: max,
+      p_description: $('adm_desc').value
     });
     if (r.error) {
       admMsg(r.error.message);
@@ -498,6 +537,7 @@
       $('adm_title').value = '';
       $('adm_price').value = '';
       $('adm_max').value = '';
+      $('adm_desc').value = '';
       refreshAll();
     }
   };
